@@ -35,16 +35,34 @@ The repository includes a cleaned dataset that is small enough for GitHub and su
 
 ## Reproducibility
 
-To rebuild the cleaned dataset from the raw survey file, place `survey_results_public.csv` in `data/` and run:
+There are two ways to reproduce this project:
+
+### 1. Run the dashboard immediately
+
+This is the easiest way to reproduce the project. The repository already includes `data/cleaned_stackoverflow_data.csv`, so the dashboard can be run without downloading any additional files.
 
 ```bash
-.venv/bin/python src/build_clean_dataset.py
+git clone https://github.com/bellahavel/stack-overflow-developer-survey-analysis.git
+cd stack-overflow-developer-survey-analysis
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+streamlit run app.py
 ```
 
-To open the supporting notebook:
+### 2. Rebuild the cleaned dataset from the raw survey file
+
+Use this option if you want to reproduce the cleaning pipeline from the original Stack Overflow survey data. First clone the repository, then download `survey_results_public.csv` and place it in the `data/` folder before running the cleaning script.
 
 ```bash
-.venv/bin/jupyter notebook
+git clone https://github.com/bellahavel/stack-overflow-developer-survey-analysis.git
+cd stack-overflow-developer-survey-analysis
+# Place survey_results_public.csv in the data/ folder
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python src/build_clean_dataset.py
+streamlit run app.py
 ```
 
 ## Repository Structure
