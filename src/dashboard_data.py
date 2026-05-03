@@ -73,6 +73,7 @@ def prepare_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def load_dashboard_data(csv_path: str) -> DashboardDataBundle:
     df = pd.read_csv(csv_path, low_memory=False)
     df = prepare_dashboard_dataframe(df)
+    salary_cap = df["ConvertedCompYearly"].quantile(0.99)
 
     salary_df = df[df["ConvertedCompYearly"].notna()].copy()
     jobsat_df = df[df["JobSat"].notna()].copy()
