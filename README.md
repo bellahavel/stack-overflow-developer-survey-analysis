@@ -20,13 +20,9 @@ Written narrative files:
 
 ## Dataset Note
 
-The main survey file `data/survey_results_public.csv` is not tracked in GitHub because it exceeds GitHub's 100 MB file limit.
+The repository includes a cleaned analysis dataset at `data/cleaned_stackoverflow_data.csv`, which is the file used by the dashboard.
 
-To run the dashboard locally, download the 2025 Stack Overflow Developer Survey CSV from [https://survey.stackoverflow.co/](https://survey.stackoverflow.co/) and place:
-
-- `survey_results_public.csv`
-
-inside the `data/` folder.
+The original raw survey file `survey_results_public.csv` is much larger and is kept only for local development. The cleaned dataset preserves the professional-developer subset and the columns needed to reproduce the dashboard analysis.
 
 This project analyzes the 2025 Stack Overflow Developer Survey to identify patterns in developer salaries, job satisfaction, programming language usage, and demographics. The main analytical goal is to understand which factors appear most associated with salary and job satisfaction for professional developers.
 
@@ -67,6 +63,12 @@ Run the dashboard:
 
 ```bash
 .venv/bin/streamlit run app.py
+```
+
+If you want to rebuild the cleaned dataset from the raw survey file:
+
+```bash
+.venv/bin/python src/build_clean_dataset.py
 ```
 
 ## Notes

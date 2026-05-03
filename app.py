@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 ROOT = Path(__file__).resolve().parent
-DATA_PATH = ROOT / "data" / "survey_results_public.csv"
+DATA_PATH = ROOT / "data" / "cleaned_stackoverflow_data.csv"
 NARRATIVE_PATH = ROOT / "docs" / "final_narrative.md"
 
 

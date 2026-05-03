@@ -16,6 +16,21 @@ REMOTE_ORDER = [
 
 EXPERIENCE_LABELS = ["0-2", "3-5", "6-10", "11-15", "16-20", "20+"]
 
+KEEP_COLS = [
+    "ResponseId",
+    "Age",
+    "EdLevel",
+    "WorkExp",
+    "YearsCode",
+    "DevType",
+    "OrgSize",
+    "RemoteWork",
+    "Country",
+    "LanguageHaveWorkedWith",
+    "ConvertedCompYearly",
+    "JobSat",
+]
+
 
 @dataclass(frozen=True)
 class DashboardDataBundle:
@@ -26,29 +41,16 @@ class DashboardDataBundle:
     language_df: pd.DataFrame
 
 
-def load_dashboard_data(csv_path: str) -> DashboardDataBundle:
-    df = pd.read_csv(csv_path, low_memory=False)
-    df = df[df["MainBranch"] == "I am a developer by profession"].copy()
+def prepare_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if "MainBranch" in df.columns:
+        df = df[df["MainBranch"] == "I am a developer by profession"].copy()
     df = df.drop_duplicates(subset="ResponseId")
-
-    keep_cols = [
-        "ResponseId",
-        "Age",
-        "EdLevel",
-        "WorkExp",
-        "YearsCode",
-        "DevType",
-        "OrgSize",
-        "RemoteWork",
-        "Country",
-        "LanguageHaveWorkedWith",
-        "ConvertedCompYearly",
-        "JobSat",
-    ]
-    df = df[keep_cols].copy()
+    available_cols = [col for col in KEEP_COLS if col in df.columns]
+    df = df[available_cols].copy()
 
     for col in ["WorkExp", "YearsCode", "ConvertedCompYearly", "JobSat"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
 
     df["experience_bin"] = pd.cut(
         df["WorkExp"],
@@ -65,6 +67,12 @@ def load_dashboard_data(csv_path: str) -> DashboardDataBundle:
     salary_cap = df["ConvertedCompYearly"].quantile(0.99)
     df["salary_capped"] = df["ConvertedCompYearly"].clip(upper=salary_cap)
     df["RemoteWork"] = pd.Categorical(df["RemoteWork"], categories=REMOTE_ORDER, ordered=True)
+    return df
+
+
+def load_dashboard_data(csv_path: str) -> DashboardDataBundle:
+    df = pd.read_csv(csv_path, low_memory=False)
+    df = prepare_dashboard_dataframe(df)
 
     salary_df = df[df["ConvertedCompYearly"].notna()].copy()
     jobsat_df = df[df["JobSat"].notna()].copy()
