@@ -36,12 +36,6 @@ This project analyzes the 2025 Stack Overflow Developer Survey to identify patte
 - A final written narrative covering the question, findings, and limitations
 - A reproducible project structure with dataset, app code, and documentation
 
-## Milestone 2 deliverables
-
-- A reproducible data cleaning and exploratory data analysis notebook
-- At least 6 static visualizations with interpretive captions
-- Initial findings and hypotheses for later dashboard development
-
 ## Project structure
 
 - `data/`: survey CSV files and survey documentation
@@ -80,3 +74,4 @@ Run the dashboard:
 - The analysis focuses on respondents whose `MainBranch` is `I am a developer by profession`.
 - Salary analysis uses `ConvertedCompYearly` and caps values at the 99th percentile for visualization so extreme outliers do not dominate the charts.
 - Country filters are intentionally prominent in the dashboard because salary comparisons in a global survey can be misleading without geographic context.
+- The Milestone 2 notebook is included as supporting analysis, but the final dashboard runs independently from `app.py`.
