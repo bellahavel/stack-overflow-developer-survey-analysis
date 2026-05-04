@@ -26,12 +26,6 @@ streamlit run app.py
 
 Then open the local URL shown in Terminal, usually `http://localhost:8501`.
 
-To rebuild the narrative PDF from the Markdown source, run:
-
-```bash
-python src/export_narrative_pdf.py
-```
-
 ## Dataset
 
 - Source: [Stack Overflow Developer Survey 2025](https://survey.stackoverflow.co/)
@@ -70,21 +64,6 @@ pip install -r requirements.txt
 python src/build_clean_dataset.py
 streamlit run app.py
 ```
-
-### 3. Rebuild the narrative PDF
-
-If you want to regenerate the PDF deliverable from the Markdown narrative source, use the included export script:
-
-```bash
-git clone https://github.com/bellahavel/stack-overflow-developer-survey-analysis.git
-cd stack-overflow-developer-survey-analysis
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python src/export_narrative_pdf.py
-```
-
-This writes `docs/Final_Narrative.pdf` from `docs/final_narrative.md`. If the milestone draft Markdown file is present, the script also rebuilds that PDF.
 
 ## Repository Structure
 
