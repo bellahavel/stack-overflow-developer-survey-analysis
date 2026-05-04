@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.dashboard_data import (
@@ -31,9 +32,27 @@ def get_data():
     return load_dashboard_data(str(DATA_PATH))
 
 
+def mark_display_controls_dirty():
+    st.session_state["reset_display_controls"] = True
+
+
 bundle = get_data()
 df = bundle.df
 MIN_COUNTRY_RESPONSES = 10
+REMOTE_DISPLAY_LABELS = {
+    "In-person": "In-person",
+    "Hybrid (some remote, leans heavy to in-person)": "Hybrid: mostly in-person",
+    "Hybrid (some in-person, leans heavy to flexibility)": "Hybrid: mostly remote",
+    "Remote": "Remote",
+    "Your choice (very flexible, you can come in when you want or just as needed)": "Flexible / as-needed",
+}
+REMOTE_DISPLAY_ORDER = [
+    "In-person",
+    "Hybrid: mostly in-person",
+    "Flexible / as-needed",
+    "Hybrid: mostly remote",
+    "Remote",
+]
 
 st.markdown(
     """
@@ -66,6 +85,13 @@ st.markdown(
         border-left: 5px solid #9c6644;
         margin: 0.4rem 0 1rem 0;
     }
+    .takeaway {
+        margin-top: 0.35rem;
+        margin-bottom: 0.2rem;
+        color: #31333f;
+        font-size: 1rem;
+        line-height: 1.5;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -74,9 +100,9 @@ st.markdown(
 st.markdown(
     """
     <div class="hero">
-        <h1>Stack Overflow Developer Survey Dashboard</h1>
-        <p><strong>Question:</strong> What factors appear to influence salary and job satisfaction among professional developers?</p>
-        <p>This final dashboard is designed for a non-technical audience. It highlights the patterns that mattered most in the analysis: experience, geography, remote work, and the gap between pay and satisfaction.</p>
+        <h1>What drives developer salary and job satisfaction?</h1>
+        <p>This dashboard explores how experience, geography, and work arrangement shape pay and satisfaction.</p>
+        <p><strong>Key insight:</strong> Salary is heavily influenced by country and experience, while satisfaction is only weakly tied to pay.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -84,44 +110,36 @@ st.markdown(
 
 with st.sidebar:
     st.header("Filters")
+    st.markdown("**Geography**")
     default_countries = df["Country"].value_counts().head(8).index.tolist()
     selected_countries = st.multiselect(
         "Country",
         options=sorted(df["Country"].dropna().unique().tolist()),
         default=default_countries,
         help="Use country filters to avoid misleading global salary comparisons.",
+        key="selected_countries",
+        on_change=mark_display_controls_dirty,
     )
+    st.markdown("**Work Context**")
     selected_remote = st.multiselect(
         "Work arrangement",
         options=REMOTE_ORDER,
         default=["Remote", "In-person", "Hybrid (some in-person, leans heavy to flexibility)"],
+        key="selected_remote",
+        on_change=mark_display_controls_dirty,
     )
     selected_experience = st.multiselect(
         "Experience band",
         options=EXPERIENCE_LABELS,
         default=EXPERIENCE_LABELS,
+        key="selected_experience",
+        on_change=mark_display_controls_dirty,
     )
-    eligible_country_count = (
-        filter_frame(bundle.salary_df, selected_countries, selected_remote, selected_experience)
-        .groupby("Country", dropna=True)
-        .agg(respondents=("ResponseId", "count"))
-        .query(f"respondents >= {MIN_COUNTRY_RESPONSES}")
-        .shape[0]
-    )
-    country_slider_max = max(1, eligible_country_count)
-    country_slider_default = min(10, country_slider_max)
-    top_n_countries = st.slider(
-        "Countries shown in geographic view",
-        min_value=1,
-        max_value=country_slider_max,
-        value=country_slider_default,
-    )
-    top_n_languages = st.slider("Languages shown", min_value=5, max_value=15, value=10)
     st.markdown(
         """
         <div class="note-card">
         <strong>How to read this dashboard</strong><br>
-        Start with the Overview tab for the big picture, then use Salary Explorer and Satisfaction Explorer to compare filtered groups.
+        Start with Overview for the big picture, then use Salary Explorer and Satisfaction Explorer to compare filtered groups.
         </div>
         """,
         unsafe_allow_html=True,
@@ -132,7 +150,6 @@ filtered_df = filter_frame(df, selected_countries, selected_remote, selected_exp
 filtered_salary = filter_frame(bundle.salary_df, selected_countries, selected_remote, selected_experience)
 filtered_jobsat = filter_frame(bundle.jobsat_df, selected_countries, selected_remote, selected_experience)
 filtered_scatter = filter_frame(bundle.scatter_df, selected_countries, selected_remote, selected_experience)
-filtered_languages = filter_frame(bundle.language_df, selected_countries, selected_remote, selected_experience)
 
 summary = salary_summary(filtered_df)
 
@@ -147,14 +164,18 @@ metric_cols[2].metric(
     "N/A" if pd.isna(summary["median_jobsat"]) else f"{summary['median_jobsat']:.1f} / 10",
 )
 metric_cols[3].metric(
-    "Median languages used",
+    "Median languages per developer",
     "N/A" if pd.isna(summary["median_languages"]) else f"{summary['median_languages']:.0f}",
 )
+metric_cols[0].caption("Across selected filters")
+metric_cols[1].caption("Across selected filters")
+metric_cols[2].caption("Across selected filters")
+metric_cols[3].caption("Across selected filters")
 
 st.markdown(
     """
     <div class="note-card">
-    <strong>Key interpretation rule:</strong> salary in this survey is strongly influenced by country. That is why the dashboard puts country filters up front and keeps geography visible in the overview.
+    <strong>Important:</strong> Salary varies a lot by country. Use the country filter to compare fairly.
     </div>
     """,
     unsafe_allow_html=True,
@@ -164,32 +185,77 @@ if filtered_df.empty:
     st.error("No responses match the current filters. Broaden the country, work arrangement, or experience selections.")
     st.stop()
 
-tab_overview, tab_salary, tab_satisfaction, tab_narrative = st.tabs(
-    ["Overview", "Salary Explorer", "Satisfaction Explorer", "Final Narrative"]
+selected_section = st.radio(
+    "Section",
+    ["Overview", "Salary Explorer", "Satisfaction Explorer", "Final Narrative"],
+    horizontal=True,
+    label_visibility="collapsed",
 )
 
-with tab_overview:
-    st.subheader("Question and dashboard purpose")
+with st.sidebar:
+    if selected_section == "Overview":
+        st.markdown("**Display Controls**")
+        eligible_country_count = (
+            filter_frame(bundle.salary_df, selected_countries, selected_remote, selected_experience)
+            .groupby("Country", dropna=True)
+            .agg(respondents=("ResponseId", "count"))
+            .query(f"respondents >= {MIN_COUNTRY_RESPONSES}")
+            .shape[0]
+        )
+        country_slider_max = max(1, eligible_country_count)
+        if st.session_state.get("reset_display_controls", True):
+            st.session_state["top_n_countries"] = country_slider_max
+            st.session_state["reset_display_controls"] = False
+
+        if st.session_state.get("top_n_countries", country_slider_max) > country_slider_max:
+            st.session_state["top_n_countries"] = country_slider_max
+
+        if country_slider_max == 1:
+            top_n_countries = 1
+            st.caption("Countries shown in country salary chart: 1")
+        else:
+            top_n_countries = st.slider(
+                "Countries shown in country salary chart",
+                min_value=1,
+                max_value=country_slider_max,
+                key="top_n_countries",
+            )
+    else:
+        top_n_countries = max(
+            1,
+            (
+                filter_frame(bundle.salary_df, selected_countries, selected_remote, selected_experience)
+                .groupby("Country", dropna=True)
+                .agg(respondents=("ResponseId", "count"))
+                .query(f"respondents >= {MIN_COUNTRY_RESPONSES}")
+                .shape[0]
+            ),
+        )
+
+if selected_section == "Overview":
+    st.subheader("What this dashboard shows")
     st.write(
-        "The project asks which factors appear to influence salary and job satisfaction among professional developers. "
-        "This dashboard is designed for a non-technical audience, so it emphasizes interactive comparisons rather than dense modeling output."
+        "This overview highlights how salary and job satisfaction vary across country, experience, and work arrangement."
     )
     st.caption(
         "Dataset source: Stack Overflow Developer Survey 2025 — https://survey.stackoverflow.co/"
     )
-    with st.expander("Methodology summary", expanded=False):
+    with st.expander("How the data was prepared", expanded=False):
         st.write(
-            "The analysis focuses on respondents who identified themselves as professional developers. "
-            "The dataset was cleaned by removing duplicate responses, converting salary and job satisfaction fields to numeric values, "
-            "documenting missingness, and capping salary at the 99th percentile for visualization clarity."
+            "The dashboard focuses on respondents who identified as professional developers. "
+            "Duplicate responses were removed, salary and job satisfaction were converted to numeric values, "
+            "and salary is capped at the 99th percentile in charts so extreme outliers do not flatten the rest of the view."
         )
     st.markdown(
         """
         **What to notice first**
-        - Salary changes the most across **experience** and **country**.
-        - Remote and flexible work patterns are linked to both **higher pay** and **slightly higher job satisfaction**.
-        - Salary and job satisfaction move together only weakly, so they should not be treated as the same outcome.
+        - Salary changes most with **experience** and **country**.
+        - Remote work is linked to **slightly higher pay** and **satisfaction**.
+        - Salary and satisfaction are only **weakly related**.
         """
+    )
+    st.write(
+        "Start with the country chart, then use the other tabs to compare salary and satisfaction patterns in more detail."
     )
 
     country_summary = (
@@ -200,70 +266,50 @@ with tab_overview:
         .head(top_n_countries)
         .reset_index()
     )
-    language_summary = (
-        filtered_languages.groupby("Language", dropna=True)
-        .agg(respondents=("ResponseId", "nunique"))
-        .sort_values("respondents", ascending=False)
-        .head(top_n_languages)
-        .reset_index()
-    )
-
-    chart_col1, chart_col2 = st.columns(2)
-
     if not country_summary.empty:
         fig_country = px.bar(
             country_summary.sort_values("median_salary"),
             x="median_salary",
             y="Country",
             orientation="h",
+            text="median_salary",
             hover_data={"respondents": True, "median_salary": ":,.0f"},
             labels={"median_salary": "Median annual salary (USD)"},
-            title="Country view: median salary in the filtered sample",
+            title=(
+                "Median salary by country (filtered sample)"
+                "<br><sup><span style='color:#7a7a7a;'>"
+                f"Showing {len(country_summary)} countries; only countries with at least {MIN_COUNTRY_RESPONSES} salary responses are included."
+                "</span></sup>"
+            ),
             color="median_salary",
             color_continuous_scale="YlOrRd",
         )
-        fig_country.update_layout(coloraxis_showscale=False, height=520)
-        chart_col1.plotly_chart(fig_country, use_container_width=True)
-        chart_col1.caption(
-            f"Showing {len(country_summary)} countries. The chart only includes countries with at least {MIN_COUNTRY_RESPONSES} salary responses after filtering."
+        fig_country.update_traces(texttemplate="$%{text:,.0f}", textposition="outside")
+        fig_country.update_layout(
+            coloraxis_showscale=False,
+            height=520,
+            xaxis_range=[0, country_summary["median_salary"].max() * 1.16],
+        )
+        st.plotly_chart(fig_country, use_container_width=True)
+        st.markdown(
+            '<div class="takeaway"><strong>Takeaway:</strong> Country and experience drive the largest salary differences in the dashboard.</div>',
+            unsafe_allow_html=True,
         )
     else:
-        chart_col1.info("Not enough salary data for the current country view.")
+        st.info("Not enough salary data for the current country view.")
 
-    if not language_summary.empty:
-        fig_language = px.bar(
-            language_summary.sort_values("respondents"),
-            x="respondents",
-            y="Language",
-            orientation="h",
-            labels={"respondents": "Number of respondents"},
-            title="Most common languages in the filtered sample",
-            color="respondents",
-            color_continuous_scale="Tealgrn",
-        )
-        fig_language.update_layout(coloraxis_showscale=False, height=520)
-        chart_col2.plotly_chart(fig_language, use_container_width=True)
-    else:
-        chart_col2.info("No language responses match the current filters.")
-
-    st.markdown(
-        """
-        **Overview takeaway:** Experience and geography still drive the strongest salary differences, while remote-work patterns appear more closely tied to both pay and perceived job quality.
-        """
-    )
-
-with tab_salary:
+elif selected_section == "Salary Explorer":
     st.subheader("Interactive salary views")
     st.write(
         "This view focuses on compensation patterns. Use the filters to compare salary distributions across work arrangements, experience groups, and countries."
     )
     st.info(
-        "Recommended use: start with the remote-work comparison, then switch to the salary-vs-satisfaction view to see whether higher pay actually maps cleanly onto happier developers."
+        "Recommended use: start with the experience view to see the clearest salary progression, then use remote work and country views for added context."
     )
 
     salary_view = st.radio(
         "Salary chart",
-        options=["Remote work comparison", "Salary vs. job satisfaction", "Country drill-down"],
+        options=["Remote work comparison", "Experience comparison"],
         horizontal=True,
     )
 
@@ -272,121 +318,143 @@ with tab_salary:
         if chart_data.empty:
             st.warning("No salary and remote-work responses match the current filters.")
         else:
+            st.caption("For the clearest work-arrangement comparison, select one country at a time.")
+            chart_data["RemoteWorkLabel"] = chart_data["RemoteWork"].map(REMOTE_DISPLAY_LABELS).fillna(
+                chart_data["RemoteWork"].astype(str)
+            )
+            active_remote_labels = [
+                label for label in REMOTE_DISPLAY_ORDER if label in chart_data["RemoteWorkLabel"].dropna().unique()
+            ]
+            chart_data["RemoteWorkLabel"] = pd.Categorical(
+                chart_data["RemoteWorkLabel"], categories=active_remote_labels, ordered=True
+            )
+            remote_counts = (
+                chart_data.groupby("RemoteWorkLabel", observed=False)
+                .size()
+                .reindex(active_remote_labels, fill_value=0)
+            )
             fig = px.box(
                 chart_data,
-                x="RemoteWork",
+                x="RemoteWorkLabel",
                 y="salary_capped",
-                color="RemoteWork",
+                color="RemoteWorkLabel",
                 points="outliers",
                 labels={
-                    "RemoteWork": "Work arrangement",
-                    "salary_capped": "Annual salary (USD, capped at 99th percentile)",
+                    "RemoteWorkLabel": "Work arrangement",
+                    "salary_capped": "Annual salary (USD)",
                 },
-                title="Salary distribution by work arrangement",
+                title="Salary distribution by work arrangement (filtered sample)",
                 hover_data=["Country", "experience_bin", "EdLevel"],
+                category_orders={"RemoteWorkLabel": active_remote_labels},
+                color_discrete_sequence=["#d8e6f3", "#a9cce3", "#7fb3d5", "#5499c7", "#21618c"],
             )
             fig.update_layout(showlegend=False, height=560)
             st.plotly_chart(fig, use_container_width=True)
-            st.caption("Interactive View 1: Hover to inspect distributions and compare the spread as well as the median.")
-            st.markdown(
-                """
-                **Why this matters:** This chart helps separate a simple “remote workers earn more” claim from the fuller distribution. It shows typical salary and spread, not just one average.
-                """
-            )
-
-    elif salary_view == "Salary vs. job satisfaction":
-        chart_data = filtered_scatter.copy()
-        if chart_data.empty:
-            st.warning("No joint salary and job satisfaction responses match the current filters.")
-        else:
-            fig = px.scatter(
-                chart_data.sample(min(6000, len(chart_data)), random_state=42),
-                x="JobSat",
-                y="ConvertedCompYearly",
-                color="experience_bin",
-                size="language_count",
-                hover_data=["Country", "RemoteWork", "DevType"],
-                labels={"JobSat": "Job satisfaction (0-10)", "ConvertedCompYearly": "Annual salary (USD)"},
-                title="Salary vs. job satisfaction",
-            )
-            fig.update_layout(height=560)
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption("Interactive View 2: This scatterplot supports drill-down into how salary and job satisfaction vary together by experience.")
-            st.markdown(
-                """
-                **Why this matters:** If salary alone explained job satisfaction, the points would form a much tighter upward pattern. Instead, the relationship is positive but still loose.
-                """
-            )
-
-    else:
-        chart_data = (
-            filtered_salary.groupby("Country", dropna=True)
-            .agg(respondents=("ResponseId", "count"), median_salary=("ConvertedCompYearly", "median"))
-            .query(f"respondents >= {MIN_COUNTRY_RESPONSES}")
-            .sort_values("median_salary", ascending=False)
-            .head(top_n_countries)
-            .reset_index()
-        )
-        if chart_data.empty:
-            st.warning("Not enough salary responses remain for a country drill-down.")
-        else:
-            fig = px.bar(
-                chart_data,
-                x="Country",
-                y="median_salary",
-                color="respondents",
-                hover_data={"respondents": True, "median_salary": ":,.0f"},
-                labels={"median_salary": "Median salary (USD)"},
-                title="Top countries by median salary in the filtered sample",
-            )
-            fig.update_layout(height=560)
-            st.plotly_chart(fig, use_container_width=True)
-            st.caption("This view keeps the country effect visible so users do not overinterpret a single global salary number.")
-            st.markdown(
-                """
-                **Why this matters:** This is the main geographic reality check in the app. It reminds the audience that global salary comparisons need context.
-                """
+            st.caption(
+                "Group sizes: "
+                + ", ".join(f"{label} (n={remote_counts[label]:,})" for label in active_remote_labels)
             )
             st.caption(
-                f"Showing {len(chart_data)} countries. Only countries with at least {MIN_COUNTRY_RESPONSES} salary responses in the filtered data are included."
+                "Note: salaries are capped at the 99th percentile to prevent extreme outliers from compressing the rest of the distribution."
+            )
+            st.markdown(
+                '<div class="takeaway"><strong>Takeaway:</strong> Remote and flexible arrangements trend higher, but country mix may influence the pattern.</div>',
+                unsafe_allow_html=True,
             )
 
-with tab_satisfaction:
+    elif salary_view == "Experience comparison":
+        salary_experience = (
+            filtered_salary.dropna(subset=["experience_bin"])
+            .groupby("experience_bin", dropna=True)
+            .agg(median_salary=("ConvertedCompYearly", "median"), respondents=("ResponseId", "count"))
+            .reset_index()
+        )
+        salary_experience["experience_bin"] = pd.Categorical(
+            salary_experience["experience_bin"], categories=EXPERIENCE_LABELS, ordered=True
+        )
+        salary_experience = salary_experience.sort_values("experience_bin")
+        salary_experience_dist = filtered_salary.dropna(subset=["experience_bin"]).copy()
+        salary_experience_dist["experience_bin"] = pd.Categorical(
+            salary_experience_dist["experience_bin"], categories=EXPERIENCE_LABELS, ordered=True
+        )
+
+        salary_col1, salary_col2 = st.columns(2)
+
+        if salary_experience.empty:
+            salary_col1.warning("No experience-based salary responses match the current filters.")
+        else:
+            fig_experience = px.bar(
+                salary_experience,
+                x="median_salary",
+                y="experience_bin",
+                orientation="h",
+                text="median_salary",
+                color_discrete_sequence=["#21618c"],
+                hover_data={"respondents": True, "median_salary": ":,.0f"},
+                labels={"experience_bin": "Experience band", "median_salary": "Median salary (USD)"},
+                title="Median salary by experience band",
+            )
+            fig_experience.update_traces(texttemplate="$%{text:,.0f}", textposition="outside")
+            fig_experience.update_layout(
+                height=560,
+                xaxis_range=[0, salary_experience["median_salary"].max() * 1.18],
+                coloraxis_showscale=False,
+            )
+            salary_col1.plotly_chart(fig_experience, use_container_width=True)
+            salary_col1.markdown(
+                '<div class="takeaway"><strong>Takeaway:</strong> Median salary rises clearly with experience.</div>',
+                unsafe_allow_html=True,
+            )
+        if salary_experience_dist.empty:
+            salary_col2.warning("No experience-based salary responses match the current filters.")
+        else:
+            fig_experience_box = px.box(
+                salary_experience_dist,
+                x="experience_bin",
+                y="salary_capped",
+                color_discrete_sequence=["#7fb3d5"],
+                points="outliers",
+                labels={
+                    "experience_bin": "Experience band",
+                    "salary_capped": "Annual salary (USD, capped at 99th percentile)",
+                },
+                title="Salary distribution by experience band (filtered sample)",
+                hover_data=["Country", "RemoteWork", "EdLevel"],
+                category_orders={"experience_bin": EXPERIENCE_LABELS},
+            )
+            fig_experience_box.update_layout(showlegend=False, height=560)
+            salary_col2.plotly_chart(fig_experience_box, use_container_width=True)
+            salary_col2.caption(
+                "Salaries are capped at the 99th percentile to prevent extreme outliers from compressing the rest of the distribution."
+            )
+            salary_col2.markdown(
+                '<div class="takeaway"><strong>Takeaway:</strong> Salary rises with experience, but pay still varies widely within each band.</div>',
+                unsafe_allow_html=True,
+            )
+
+elif selected_section == "Satisfaction Explorer":
     st.subheader("Interactive job satisfaction views")
     st.write(
-        "This view emphasizes the non-salary side of the project question by showing how job satisfaction changes across flexibility, experience, and location."
+        "This page shows how job satisfaction changes across work arrangement and experience, and how those patterns compare with the stronger salary differences shown in Salary Explorer."
     )
     st.info(
-        "Job satisfaction varies across work arrangements and experience levels, but the differences are smaller than the salary gaps shown elsewhere in the dashboard."
+        "Job satisfaction changes across groups, but much less than salary."
     )
-
-    sat_col1, sat_col2 = st.columns(2)
+    satisfaction_view = st.radio(
+        "Satisfaction chart",
+        options=["Satisfaction by work arrangement", "Satisfaction by experience", "Salary vs. job satisfaction"],
+        horizontal=True,
+    )
 
     sat_remote = (
         filtered_jobsat.groupby("RemoteWork", dropna=True)
         .agg(respondents=("ResponseId", "count"), avg_jobsat=("JobSat", "mean"))
         .reset_index()
     )
-    sat_remote["RemoteWork"] = pd.Categorical(sat_remote["RemoteWork"], categories=REMOTE_ORDER, ordered=True)
-    sat_remote = sat_remote.sort_values("RemoteWork")
-
-    if not sat_remote.empty:
-        fig_sat_remote = px.bar(
-            sat_remote,
-            x="RemoteWork",
-            y="avg_jobsat",
-            color="respondents",
-            text="avg_jobsat",
-            hover_data={"respondents": True, "avg_jobsat": ":.2f"},
-            labels={"avg_jobsat": "Average job satisfaction (0-10)", "RemoteWork": "Work arrangement"},
-            title="Average job satisfaction by work arrangement",
-        )
-        fig_sat_remote.update_traces(texttemplate="%{text:.2f}", textposition="outside")
-        fig_sat_remote.update_layout(height=500, yaxis_range=[0, 8.5], coloraxis_colorbar_title="Respondents")
-        sat_col1.plotly_chart(fig_sat_remote, use_container_width=True)
-        sat_col1.caption("Remote workers report the highest average satisfaction, but the gap is small.")
-    else:
-        sat_col1.info("No job-satisfaction responses match the current filters.")
+    sat_remote["RemoteWorkLabel"] = sat_remote["RemoteWork"].map(REMOTE_DISPLAY_LABELS).fillna(
+        sat_remote["RemoteWork"].astype(str)
+    )
+    sat_remote = sat_remote.sort_values("avg_jobsat", ascending=False)
 
     sat_experience = (
         filtered_jobsat.groupby("experience_bin", dropna=True)
@@ -394,23 +462,123 @@ with tab_satisfaction:
         .reset_index()
         .sort_values("experience_bin")
     )
-    if not sat_experience.empty:
-        fig_sat_exp = px.line(
-            sat_experience,
-            x="experience_bin",
-            y="avg_jobsat",
-            markers=True,
-            hover_data={"respondents": True, "avg_jobsat": ":.2f"},
-            labels={"experience_bin": "Experience band", "avg_jobsat": "Average job satisfaction (0-10)"},
-            title="Job satisfaction by experience band",
-        )
-        fig_sat_exp.update_layout(height=500)
-        sat_col2.plotly_chart(fig_sat_exp, use_container_width=True)
-        sat_col2.caption("Satisfaction rises slightly with experience, and the change is gradual.")
-    else:
-        sat_col2.info("No experience-based satisfaction data match the current filters.")
 
-with tab_narrative:
+    if satisfaction_view == "Satisfaction by work arrangement":
+        if not sat_remote.empty:
+            fig_sat_remote = px.bar(
+                sat_remote,
+                x="RemoteWorkLabel",
+                y="avg_jobsat",
+                text="avg_jobsat",
+                hover_data={"respondents": True, "avg_jobsat": ":.2f"},
+                labels={"avg_jobsat": "Average job satisfaction (0-10)", "RemoteWorkLabel": "Work arrangement"},
+                title="Average job satisfaction by work arrangement",
+                color_discrete_sequence=["#4f8f83"],
+            )
+            fig_sat_remote.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+            fig_sat_remote.update_layout(height=500, yaxis_range=[0, 10], showlegend=False)
+            st.plotly_chart(fig_sat_remote, use_container_width=True)
+            st.markdown(
+                '<div class="takeaway"><strong>Takeaway:</strong> Satisfaction is slightly higher for remote and flexible arrangements, but the gap is small.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("No job-satisfaction responses match the current filters.")
+    elif satisfaction_view == "Satisfaction by experience":
+        if not sat_experience.empty:
+            fig_sat_exp = px.bar(
+                sat_experience,
+                x="experience_bin",
+                y="avg_jobsat",
+                text="avg_jobsat",
+                hover_data={"respondents": True, "avg_jobsat": ":.2f"},
+                labels={"experience_bin": "Experience band", "avg_jobsat": "Average job satisfaction (0-10)"},
+                title="Job satisfaction by experience band",
+                color_discrete_sequence=["#4f8f83"],
+            )
+            fig_sat_exp.update_traces(texttemplate="%{text:.2f}", textposition="outside")
+            fig_sat_exp.update_layout(height=500, yaxis_range=[0, 10], showlegend=False)
+            st.plotly_chart(fig_sat_exp, use_container_width=True)
+            st.markdown(
+                '<div class="takeaway"><strong>Takeaway:</strong> Satisfaction rises only slightly with experience.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.info("No experience-based satisfaction data match the current filters.")
+    else:
+        chart_data = filtered_scatter.copy()
+        if chart_data.empty:
+            st.warning("No joint salary and job satisfaction responses match the current filters.")
+        else:
+            scatter_sample = chart_data.sample(min(4000, len(chart_data)), random_state=42).copy()
+            scatter_sample["JobSatJitter"] = scatter_sample["JobSat"] + (
+                pd.Series(range(len(scatter_sample)), index=scatter_sample.index).mod(7) - 3
+            ) * 0.045
+            salary_by_satisfaction = (
+                chart_data.groupby("JobSat", dropna=True)
+                .agg(median_salary=("ConvertedCompYearly", "median"), respondents=("ResponseId", "count"))
+                .reset_index()
+            )
+            fig = go.Figure()
+            fig.add_trace(
+                go.Scatter(
+                    x=scatter_sample["JobSatJitter"],
+                    y=scatter_sample["ConvertedCompYearly"],
+                    mode="markers",
+                    name="Respondents",
+                    marker={
+                        "color": "#7fb3d5",
+                        "size": 7,
+                        "opacity": 0.22,
+                        "line": {"width": 0},
+                    },
+                    customdata=scatter_sample[["Country", "RemoteWork", "experience_bin"]],
+                    hovertemplate=(
+                        "Job satisfaction: %{x:.1f}<br>"
+                        "Annual salary: $%{y:,.0f}<br>"
+                        "Country: %{customdata[0]}<br>"
+                        "Work arrangement: %{customdata[1]}<br>"
+                        "Experience band: %{customdata[2]}<extra></extra>"
+                    ),
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=salary_by_satisfaction["JobSat"],
+                    y=salary_by_satisfaction["median_salary"],
+                    mode="lines+markers",
+                    name="Median salary",
+                    line={"color": "#9c6644", "width": 3},
+                    marker={"size": 7, "color": "#9c6644"},
+                    customdata=salary_by_satisfaction[["respondents"]],
+                    hovertemplate=(
+                        "Job satisfaction: %{x:.0f}<br>"
+                        "Median salary: $%{y:,.0f}<br>"
+                        "Respondents: %{customdata[0]:,}<extra></extra>"
+                    ),
+                )
+            )
+            fig.update_layout(
+                title="Salary vs. job satisfaction (filtered sample)",
+                xaxis_title="Job satisfaction (0-10)",
+                yaxis_title="Annual salary (USD)",
+                height=560,
+                showlegend=False,
+            )
+            fig.update_xaxes(range=[-0.5, 10.5], dtick=1)
+            st.plotly_chart(fig, use_container_width=True)
+            st.caption(
+                "Each point is one respondent. The brown line shows the median salary at each satisfaction rating."
+            )
+            st.caption(
+                "Salaries above the 99th percentile are excluded here so extreme outliers do not dominate the pattern."
+            )
+            st.markdown(
+                '<div class="takeaway"><strong>Takeaway:</strong> Higher satisfaction is linked to somewhat higher pay, but the relationship is weak.</div>',
+                unsafe_allow_html=True,
+            )
+
+else:
     if NARRATIVE_PATH.exists():
         st.markdown(NARRATIVE_PATH.read_text())
     else:
