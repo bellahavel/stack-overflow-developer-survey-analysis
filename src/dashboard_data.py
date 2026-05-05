@@ -34,15 +34,16 @@ KEEP_COLS = [
 
 @dataclass(frozen=True)
 class DashboardDataBundle:
+    # Keep the main filtered tables together so the app can reuse them easily.
     df: pd.DataFrame
     salary_df: pd.DataFrame
     jobsat_df: pd.DataFrame
     scatter_df: pd.DataFrame
-    language_df: pd.DataFrame
 
 
 def prepare_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     if "MainBranch" in df.columns:
+        # Keep only professional developers so the sample matches the project question.
         df = df[df["MainBranch"] == "I am a developer by profession"].copy()
     df = df.drop_duplicates(subset="ResponseId")
     available_cols = [col for col in KEEP_COLS if col in df.columns]
@@ -50,8 +51,10 @@ def prepare_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in ["WorkExp", "YearsCode", "ConvertedCompYearly", "JobSat"]:
         if col in df.columns:
+            # Turn important columns into numbers so charts and summaries work correctly.
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    # Group raw years of experience into simpler career stages.
     df["experience_bin"] = pd.cut(
         df["WorkExp"],
         bins=[0, 2, 5, 10, 15, 20, 50],
@@ -60,10 +63,11 @@ def prepare_dashboard_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["experience_bin"] = pd.Categorical(df["experience_bin"], categories=EXPERIENCE_LABELS, ordered=True)
 
+    # Count how many languages each developer reported using.
     df["language_count"] = df["LanguageHaveWorkedWith"].fillna("").str.split(";").apply(
         lambda values: len([value for value in values if value.strip()])
     )
-    df["salary_k"] = df["ConvertedCompYearly"] / 1000
+    # Cap salaries at the 99th percentile so extreme outliers do not flatten the charts.
     salary_cap = df["ConvertedCompYearly"].quantile(0.99)
     df["salary_capped"] = df["ConvertedCompYearly"].clip(upper=salary_cap)
     df["RemoteWork"] = pd.Categorical(df["RemoteWork"], categories=REMOTE_ORDER, ordered=True)
@@ -75,26 +79,17 @@ def load_dashboard_data(csv_path: str) -> DashboardDataBundle:
     df = prepare_dashboard_dataframe(df)
     salary_cap = df["ConvertedCompYearly"].quantile(0.99)
 
+    # Build smaller tables for the specific views used in the dashboard.
     salary_df = df[df["ConvertedCompYearly"].notna()].copy()
     jobsat_df = df[df["JobSat"].notna()].copy()
     scatter_df = df[df["ConvertedCompYearly"].notna() & df["JobSat"].notna()].copy()
     scatter_df = scatter_df[scatter_df["ConvertedCompYearly"] <= salary_cap].copy()
-
-    language_df = (
-        df[["ResponseId", "Country", "RemoteWork", "experience_bin", "ConvertedCompYearly", "JobSat", "LanguageHaveWorkedWith"]]
-        .dropna(subset=["LanguageHaveWorkedWith"])
-        .assign(Language=lambda frame: frame["LanguageHaveWorkedWith"].str.split(";"))
-        .explode("Language")
-    )
-    language_df["Language"] = language_df["Language"].str.strip()
-    language_df = language_df[language_df["Language"].ne("")]
 
     return DashboardDataBundle(
         df=df,
         salary_df=salary_df,
         jobsat_df=jobsat_df,
         scatter_df=scatter_df,
-        language_df=language_df,
     )
 
 
@@ -104,6 +99,7 @@ def filter_frame(
     remote_options: list[str],
     experience_bins: list[str],
 ) -> pd.DataFrame:
+    # Apply the sidebar filters to any dashboard table.
     filtered = frame.copy()
     if countries:
         filtered = filtered[filtered["Country"].isin(countries)]
@@ -115,6 +111,7 @@ def filter_frame(
 
 
 def salary_summary(frame: pd.DataFrame) -> dict[str, float]:
+    # Provide the headline numbers shown at the top of the dashboard.
     if frame.empty:
         return {
             "responses": 0,

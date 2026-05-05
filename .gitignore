@@ -8,5 +8,4 @@ __pycache__/
 *.png
 figures/*.png
 data/survey_results_public.csv
-PROJECT_CONTEXT.md
 local_notes/

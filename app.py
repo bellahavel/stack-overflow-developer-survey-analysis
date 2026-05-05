@@ -29,16 +29,65 @@ NARRATIVE_PATH = ROOT / "docs" / "final_narrative.md"
 
 @st.cache_data(show_spinner=False)
 def get_data():
+    # Cache the cleaned data so the app does not reload everything on each click.
     return load_dashboard_data(str(DATA_PATH))
 
 
 def mark_display_controls_dirty():
+    # Reset overview display controls when the main filters change.
     st.session_state["reset_display_controls"] = True
+
+
+def render_note(title: str, body: str):
+    # Show a short context note in the same style across the app.
+    st.markdown(
+        f"""
+        <div class="note-card">
+        <strong>{title}</strong><br>
+        {body}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_takeaway(text: str):
+    # Show the main message under a chart.
+    st.markdown(
+        f'<div class="takeaway"><strong>Takeaway:</strong> {text}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def count_eligible_countries(frame: pd.DataFrame) -> int:
+    # Count countries with enough salary responses to compare fairly.
+    return (
+        frame.groupby("Country", dropna=True)
+        .agg(respondents=("ResponseId", "count"))
+        .query(f"respondents >= {MIN_COUNTRY_RESPONSES}")
+        .shape[0]
+    )
+
+
+def add_remote_work_labels(frame: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    # Replace long survey labels with shorter chart labels.
+    labeled = frame.copy()
+    labeled["RemoteWorkLabel"] = labeled["RemoteWork"].map(REMOTE_DISPLAY_LABELS).fillna(
+        labeled["RemoteWork"].astype(str)
+    )
+    active_labels = [
+        label for label in REMOTE_DISPLAY_ORDER if label in labeled["RemoteWorkLabel"].dropna().unique()
+    ]
+    labeled["RemoteWorkLabel"] = pd.Categorical(
+        labeled["RemoteWorkLabel"], categories=active_labels, ordered=True
+    )
+    return labeled, active_labels
 
 
 bundle = get_data()
 df = bundle.df
 MIN_COUNTRY_RESPONSES = 10
+# Shorter labels make the work arrangement charts easier to read.
 REMOTE_DISPLAY_LABELS = {
     "In-person": "In-person",
     "Hybrid (some remote, leans heavy to in-person)": "Hybrid: mostly in-person",
@@ -135,14 +184,9 @@ with st.sidebar:
         key="selected_experience",
         on_change=mark_display_controls_dirty,
     )
-    st.markdown(
-        """
-        <div class="note-card">
-        <strong>How to read this dashboard</strong><br>
-        Start with Overview for the big picture, then use Salary Explorer and Satisfaction Explorer to compare filtered groups.
-        </div>
-        """,
-        unsafe_allow_html=True,
+    render_note(
+        "How to read this dashboard",
+        "Start with Overview for the big picture, then use Salary Explorer and Satisfaction Explorer to compare filtered groups.",
     )
 
 
@@ -151,6 +195,7 @@ filtered_salary = filter_frame(bundle.salary_df, selected_countries, selected_re
 filtered_jobsat = filter_frame(bundle.jobsat_df, selected_countries, selected_remote, selected_experience)
 filtered_scatter = filter_frame(bundle.scatter_df, selected_countries, selected_remote, selected_experience)
 
+# These top numbers give a fast summary of the filtered sample.
 summary = salary_summary(filtered_df)
 
 metric_cols = st.columns(4)
@@ -172,14 +217,7 @@ metric_cols[1].caption("Across selected filters")
 metric_cols[2].caption("Across selected filters")
 metric_cols[3].caption("Across selected filters")
 
-st.markdown(
-    """
-    <div class="note-card">
-    <strong>Important:</strong> Salary varies a lot by country. Use the country filter to compare fairly.
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+render_note("Important", "Salary varies a lot by country. Use the country filter to compare fairly.")
 
 if filtered_df.empty:
     st.error("No responses match the current filters. Broaden the country, work arrangement, or experience selections.")
@@ -195,13 +233,8 @@ selected_section = st.radio(
 with st.sidebar:
     if selected_section == "Overview":
         st.markdown("**Display Controls**")
-        eligible_country_count = (
-            filter_frame(bundle.salary_df, selected_countries, selected_remote, selected_experience)
-            .groupby("Country", dropna=True)
-            .agg(respondents=("ResponseId", "count"))
-            .query(f"respondents >= {MIN_COUNTRY_RESPONSES}")
-            .shape[0]
-        )
+        # Only let the country chart show places with enough salary data to compare fairly.
+        eligible_country_count = count_eligible_countries(filtered_salary)
         country_slider_max = max(1, eligible_country_count)
         if st.session_state.get("reset_display_controls", True):
             st.session_state["top_n_countries"] = country_slider_max
@@ -221,16 +254,7 @@ with st.sidebar:
                 key="top_n_countries",
             )
     else:
-        top_n_countries = max(
-            1,
-            (
-                filter_frame(bundle.salary_df, selected_countries, selected_remote, selected_experience)
-                .groupby("Country", dropna=True)
-                .agg(respondents=("ResponseId", "count"))
-                .query(f"respondents >= {MIN_COUNTRY_RESPONSES}")
-                .shape[0]
-            ),
-        )
+        top_n_countries = max(1, count_eligible_countries(filtered_salary))
 
 if selected_section == "Overview":
     st.subheader("What this dashboard shows")
@@ -291,10 +315,7 @@ if selected_section == "Overview":
             xaxis_range=[0, country_summary["median_salary"].max() * 1.16],
         )
         st.plotly_chart(fig_country, use_container_width=True)
-        st.markdown(
-            '<div class="takeaway"><strong>Takeaway:</strong> Country and experience drive the largest salary differences in the dashboard.</div>',
-            unsafe_allow_html=True,
-        )
+        render_takeaway("Country and experience drive the largest salary differences in the dashboard.")
     else:
         st.info("Not enough salary data for the current country view.")
 
@@ -319,15 +340,8 @@ elif selected_section == "Salary Explorer":
             st.warning("No salary and remote-work responses match the current filters.")
         else:
             st.caption("For the clearest work-arrangement comparison, select one country at a time.")
-            chart_data["RemoteWorkLabel"] = chart_data["RemoteWork"].map(REMOTE_DISPLAY_LABELS).fillna(
-                chart_data["RemoteWork"].astype(str)
-            )
-            active_remote_labels = [
-                label for label in REMOTE_DISPLAY_ORDER if label in chart_data["RemoteWorkLabel"].dropna().unique()
-            ]
-            chart_data["RemoteWorkLabel"] = pd.Categorical(
-                chart_data["RemoteWorkLabel"], categories=active_remote_labels, ordered=True
-            )
+            # Use simpler names and a fixed order so the chart is easier to read.
+            chart_data, active_remote_labels = add_remote_work_labels(chart_data)
             remote_counts = (
                 chart_data.groupby("RemoteWorkLabel", observed=False)
                 .size()
@@ -357,12 +371,10 @@ elif selected_section == "Salary Explorer":
             st.caption(
                 "Note: salaries are capped at the 99th percentile to prevent extreme outliers from compressing the rest of the distribution."
             )
-            st.markdown(
-                '<div class="takeaway"><strong>Takeaway:</strong> Remote and flexible arrangements trend higher, but country mix may influence the pattern.</div>',
-                unsafe_allow_html=True,
-            )
+            render_takeaway("Remote and flexible arrangements trend higher, but country mix may influence the pattern.")
 
     elif salary_view == "Experience comparison":
+        # One chart shows the middle salary in each band, and one shows the spread.
         salary_experience = (
             filtered_salary.dropna(subset=["experience_bin"])
             .groupby("experience_bin", dropna=True)
@@ -401,10 +413,7 @@ elif selected_section == "Salary Explorer":
                 coloraxis_showscale=False,
             )
             salary_col1.plotly_chart(fig_experience, use_container_width=True)
-            salary_col1.markdown(
-                '<div class="takeaway"><strong>Takeaway:</strong> Median salary rises clearly with experience.</div>',
-                unsafe_allow_html=True,
-            )
+            salary_col1.markdown('<div class="takeaway"><strong>Takeaway:</strong> Median salary rises clearly with experience.</div>', unsafe_allow_html=True)
         if salary_experience_dist.empty:
             salary_col2.warning("No experience-based salary responses match the current filters.")
         else:
@@ -427,10 +436,7 @@ elif selected_section == "Salary Explorer":
             salary_col2.caption(
                 "Salaries are capped at the 99th percentile to prevent extreme outliers from compressing the rest of the distribution."
             )
-            salary_col2.markdown(
-                '<div class="takeaway"><strong>Takeaway:</strong> Salary rises with experience, but pay still varies widely within each band.</div>',
-                unsafe_allow_html=True,
-            )
+            salary_col2.markdown('<div class="takeaway"><strong>Takeaway:</strong> Salary rises with experience, but pay still varies widely within each band.</div>', unsafe_allow_html=True)
 
 elif selected_section == "Satisfaction Explorer":
     st.subheader("Interactive job satisfaction views")
@@ -451,9 +457,7 @@ elif selected_section == "Satisfaction Explorer":
         .agg(respondents=("ResponseId", "count"), avg_jobsat=("JobSat", "mean"))
         .reset_index()
     )
-    sat_remote["RemoteWorkLabel"] = sat_remote["RemoteWork"].map(REMOTE_DISPLAY_LABELS).fillna(
-        sat_remote["RemoteWork"].astype(str)
-    )
+    sat_remote, _ = add_remote_work_labels(sat_remote)
     sat_remote = sat_remote.sort_values("avg_jobsat", ascending=False)
 
     sat_experience = (
@@ -478,10 +482,7 @@ elif selected_section == "Satisfaction Explorer":
             fig_sat_remote.update_traces(texttemplate="%{text:.2f}", textposition="outside")
             fig_sat_remote.update_layout(height=500, yaxis_range=[0, 10], showlegend=False)
             st.plotly_chart(fig_sat_remote, use_container_width=True)
-            st.markdown(
-                '<div class="takeaway"><strong>Takeaway:</strong> Satisfaction is slightly higher for remote and flexible arrangements, but the gap is small.</div>',
-                unsafe_allow_html=True,
-            )
+            render_takeaway("Satisfaction is slightly higher for remote and flexible arrangements, but the gap is small.")
         else:
             st.info("No job-satisfaction responses match the current filters.")
     elif satisfaction_view == "Satisfaction by experience":
@@ -499,10 +500,7 @@ elif selected_section == "Satisfaction Explorer":
             fig_sat_exp.update_traces(texttemplate="%{text:.2f}", textposition="outside")
             fig_sat_exp.update_layout(height=500, yaxis_range=[0, 10], showlegend=False)
             st.plotly_chart(fig_sat_exp, use_container_width=True)
-            st.markdown(
-                '<div class="takeaway"><strong>Takeaway:</strong> Satisfaction rises only slightly with experience.</div>',
-                unsafe_allow_html=True,
-            )
+            render_takeaway("Satisfaction rises only slightly with experience.")
         else:
             st.info("No experience-based satisfaction data match the current filters.")
     else:
@@ -510,6 +508,7 @@ elif selected_section == "Satisfaction Explorer":
         if chart_data.empty:
             st.warning("No joint salary and job satisfaction responses match the current filters.")
         else:
+            # Slight x-axis jitter keeps the points from stacking directly on top of each other.
             scatter_sample = chart_data.sample(min(4000, len(chart_data)), random_state=42).copy()
             scatter_sample["JobSatJitter"] = scatter_sample["JobSat"] + (
                 pd.Series(range(len(scatter_sample)), index=scatter_sample.index).mod(7) - 3
@@ -573,10 +572,7 @@ elif selected_section == "Satisfaction Explorer":
             st.caption(
                 "Salaries above the 99th percentile are excluded here so extreme outliers do not dominate the pattern."
             )
-            st.markdown(
-                '<div class="takeaway"><strong>Takeaway:</strong> Higher satisfaction is linked to somewhat higher pay, but the relationship is weak.</div>',
-                unsafe_allow_html=True,
-            )
+            render_takeaway("Higher satisfaction is linked to somewhat higher pay, but the relationship is weak.")
 
 else:
     if NARRATIVE_PATH.exists():

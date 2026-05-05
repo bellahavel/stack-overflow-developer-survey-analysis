@@ -1,8 +1,8 @@
-pandas
-numpy
-matplotlib
-seaborn
 jupyter
+matplotlib
 nbformat
-streamlit
+numpy
+pandas
 plotly
+seaborn
+streamlit
